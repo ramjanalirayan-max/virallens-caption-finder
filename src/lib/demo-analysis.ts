@@ -1,339 +1,204 @@
-import type { AnalysisResult, StrategyOutput } from "./types";
-
-/* Curated pools used to top-up thin hashtag lists coming back from a model */
-export const HASHTAG_POOLS = {
-  facebook: [
-    "#ViralPost",
-    "#TrendingNow",
-    "#LifeMoments",
-    "#Storytelling",
-    "#BanglaVibes",
-    "#DailyLife",
-    "#Explore",
-    "#Memories",
-    "#GoodVibes",
-    "#Dhaka",
-    "#Bangladesh",
-    "#PhotoOfTheDay",
-  ],
-  twitter: ["#VibeCheck", "#Photography", "#Life", "#Mood"],
-  igHigh: ["#explorepage", "#photooftheday", "#instagood", "#reels", "#viral", "#aesthetic"],
-  igMid: [
-    "#visualstoryteller",
-    "#moodygrams",
-    "#candidfeed",
-    "#bangladeshiphotographers",
-    "#dhakagram",
-    "#streetsofdhaka",
-    "#peacefulvibes",
-    "#visualsoflife",
-  ],
-  igCommunity: [
-    "#momentkeepers",
-    "#quietluxury",
-    "#aestheticlifestyle",
-    "#creatorsofbangladesh",
-    "#banglacreators",
-    "#frameworthy",
-  ],
-  linkedin: ["#Leadership", "#Creativity", "#Mindset", "#PersonalBranding", "#Storytelling"],
-};
-
-type Archetype = "travel" | "food" | "tech" | "portrait";
-
-function detectArchetype(notes = ""): Archetype {
-  const n = notes.toLowerCase();
-  if (/(sunset|mountain|sea|beach|hill|sajek|cox|bandarban|rain|monsoon|travel|trip|nature|sky|valley|পাহাড়|সমুদ্র|ভ্রমণ|সাজেক|বৃষ্টি)/.test(n)) return "travel";
-  if (/(chai|tea|coffee|cafe|food|biryani|kacchi|dinner|lunch|street food|চা|খাবার|বিরিয়ানি|কফি)/.test(n)) return "food";
-  if (/(code|coding|desk|startup|launch|office|laptop|product|dev|build|design|কাজ|অফিস|স্টার্টআপ)/.test(n)) return "tech";
-  return "portrait";
-}
-
-const ARCHETYPE_META: Record<
-  Archetype,
-  { subjects: string[]; palette: string[]; pillars: string[]; summary: string; light: string; composition: string; audience: string; format: string }
-> = {
-  travel: {
-    subjects: ["Open landscape", "Horizon & sky gradient", "Natural leading lines", "Human-scale presence"],
-    palette: ["#1B2A41", "#F4A261", "#E9C46A", "#2A9D8F", "#F1FAEE"],
-    pillars: ["Travel", "Nature", "Slow living", "Escape"],
-    summary:
-      "A wide, atmospheric travel frame where sky and horizon carry the emotion. The scale of the scene versus the viewer creates instant 'I want to be there' pull — the single strongest share trigger for travel content.",
-    light: "Soft directional golden-hour light with long warm shadows and a cool-toned sky, giving natural depth without heavy editing.",
-    composition: "Horizon sits near the lower third, leaving generous negative space above — ideal for text overlays and a clean 4:5 crop.",
-    audience: "Travel dreamers 20-38, weekend explorers, hill-track & sea lovers in Bangladesh and the wider South Asian diaspora.",
-    format: "Full-bleed 4:5 feed photo + 6s Reel with slow push-in and ambient audio",
-  },
-  food: {
-    subjects: ["Hero food/drink item", "Warm table setting", "Steam / texture detail", "Cozy ambient context"],
-    palette: ["#3B2416", "#C9782F", "#F2D7B6", "#8A4B2A", "#1F1F1F"],
-    pillars: ["Food", "Comfort", "Nostalgia", "Everyday joy"],
-    summary:
-      "An intimate food frame that sells feeling over product — warmth, steam, texture and a lived-in table. Comfort food imagery scores high on saves and 'tag a friend' behaviour.",
-    light: "Warm tungsten-leaning ambient light with soft falloff; highlights on the rim of the cup/plate give the image its appetite appeal.",
-    composition: "Tight 45° angle with shallow depth of field keeps the hero item sharp while the background melts into mood.",
-    audience: "Foodies and cozy-lifestyle scrollers 18-40, chai/coffee culture communities, late-evening Facebook browsers.",
-    format: "Square feed photo + Story with poll sticker ('চা না কফি?')",
-  },
-  tech: {
-    subjects: ["Workspace / device setup", "Screen glow", "Minimal desk objects", "Focused working mood"],
-    palette: ["#0F172A", "#38BDF8", "#A78BFA", "#1E293B", "#F8FAFC"],
-    pillars: ["Builder life", "Productivity", "Tech", "Hustle with balance"],
-    summary:
-      "A clean builder/workspace frame with strong screen glow and minimal clutter. Setup content performs through aspiration — people save it as a reference and comment on gear.",
-    light: "Cool monitor glow against a dim room, with a warm accent lamp balancing skin/desk tones — classic 'late-night build' palette.",
-    composition: "Centered symmetry with the screen as focal point; foreground objects frame the shot and add depth.",
-    audience: "Developers, designers, students and founders 18-35 — LinkedIn and X heavy, Instagram save-driven.",
-    format: "Carousel (setup → detail → the thing you shipped) + X thread",
-  },
-  portrait: {
-    subjects: ["Human subject / expression", "Ambient background context", "Natural light on skin", "Candid body language"],
-    palette: ["#1E293B", "#F59E0B", "#10B981", "#6366F1", "#F5F5F4"],
-    pillars: ["Authenticity", "Moments", "Self-expression", "Storytelling"],
-    summary:
-      "A candid, human-led frame where expression and posture do the talking. Faces remain the strongest scroll-stopper on every feed, and the natural light here reads as real rather than staged.",
-    light: "Soft diffused natural light with gentle directional shaping; skin tones stay true and the background falls into a calm ambient wash.",
-    composition: "Subject placed slightly off-centre with breathing room in the direction of gaze — a tighter crop would intensify the emotion on mobile.",
-    audience: "Story-loving scrollers 18-35, creators and friends-of-the-subject — the group most likely to comment and share.",
-    format: "4:5 feed photo + 5s Reel with slow zoom and a trending calm audio",
-  },
-};
-
-function toneHooks(tone = "", isBangla: boolean, archetype: Archetype): { hook: string; verdict: string } {
-  const t = tone.toLowerCase();
-  if (t.includes("funny") || t.includes("meme")) {
-    return {
-      hook: isBangla ? "আমি: আজ productive হবো। আমার ছবি: 📸 ফ্রেমে পোজ দিচ্ছে 😌" : "Me: today I'll be productive. Also me: posing for this frame 😌",
-      verdict: "Meme-ready framing — relatability will drive comments faster than aesthetics.",
-    };
-  }
-  if (t.includes("professional") || t.includes("inspiring")) {
-    return {
-      hook: isBangla ? "সবচেয়ে বড় কাজগুলো সবসময় নীরবে শুরু হয়।" : "The biggest things always start quietly.",
-      verdict: "Insight-led framing — strongest on LinkedIn and as a Facebook storytelling post.",
-    };
-  }
-  if (t.includes("emotional") || t.includes("heartfelt")) {
-    return {
-      hook: isBangla ? "কিছু মুহূর্ত ক্যামেরায় না, মনে বন্দি হয়ে যায়। 🤍" : "Some moments don't get captured by the camera — they get captured by the heart. 🤍",
-      verdict: "Emotional pull is the lead signal — build the caption around memory and belonging.",
-    };
-  }
-  if (t.includes("storyteller") || t.includes("aesthetic")) {
-    return {
-      hook: isBangla ? "আলোটা ঠিক তখনই এলো, যখন কেউ দেখছিল না।" : "The light arrived exactly when no one was looking.",
-      verdict: "Aesthetic storytelling angle — let the caption breathe with short lines and white space.",
-    };
-  }
-  const byArch: Record<Archetype, [string, string]> = {
-    travel: ["কিছু জায়গা কোনো কথা না বলেই আপনাকে ঠিক করে দেয়। 🌄", "Some places fix you without saying a word. 🌄"],
-    food: ["এক কাপ চা, আর পুরো দিনটা অন্যরকম। ☕", "One cup, and the whole day changes. ☕"],
-    tech: ["রাত ২টা। স্ক্রিনের আলো। আর একটা আইডিয়া যেটা ঘুমাতে দিচ্ছে না। 💻", "2 AM. Screen glow. And one idea that won't let me sleep. 💻"],
-    portrait: ["কিছু ছবি কোনো ফিল্টারের অপেক্ষা রাখে না, মুহূর্তটাই যথেষ্ট কথা বলে দেয়। ✨", "Some frames don't need a filter — the moment does all the talking. ✨"],
-  };
-  return {
-    hook: isBangla ? byArch[archetype][0] : byArch[archetype][1],
-    verdict: "Strong thumb-stop potential — lead with the hook line and ask a comment-bait question.",
-  };
-}
-
-export function buildDefaultStrategy(
-  partial: Partial<StrategyOutput> = {},
-  archetype: Archetype = "portrait",
-  hook = ""
-): StrategyOutput {
-  const meta = ARCHETYPE_META[archetype];
-  const base: StrategyOutput = {
-    viralScore: 64,
-    scoreBreakdown: { visualImpact: 68, emotionalPull: 62, shareability: 60, trendFit: 66 },
-    verdict: "Solid organic potential — the caption hook and first-hour engagement will decide reach.",
-    bestPostingTimes: {
-      facebook: "Tue–Thu 8:00–10:00 PM BST (evening scroll peak)",
-      twitter: "Weekdays 9:00–11:00 AM & 9:00 PM BST",
-      instagram: "Fri 7:00–9:00 PM & Sun 11:00 AM BST",
-    },
-    recommendedFormat: meta.format,
-    hookVariants: hook ? [hook] : [],
-    imageImprovementTips: [
-      "Crop to 4:5 (1080×1350) so the frame fills the mobile screen.",
-      "Lift shadows by ~10% and keep highlights natural — avoid heavy saturation.",
-      "Leave the top 20% clean if you plan a text overlay for Reels/Stories.",
-    ],
-    trendAlignment:
-      "Rides the 2026 'real over produced' wave: natural light, candid framing and short, specific captions outperform glossy, over-edited posts.",
-    contentPillars: meta.pillars,
-    firstCommentStrategy:
-      "Post your own first comment within 2 minutes with a question or a behind-the-scene detail; reply to every early comment to trigger the ranking loop.",
-  };
-  return {
-    ...base,
-    ...partial,
-    scoreBreakdown: { ...base.scoreBreakdown, ...(partial.scoreBreakdown || {}) },
-    bestPostingTimes: { ...base.bestPostingTimes, ...(partial.bestPostingTimes || {}) },
-    hookVariants: partial.hookVariants?.length ? partial.hookVariants : base.hookVariants,
-    imageImprovementTips: partial.imageImprovementTips?.length ? partial.imageImprovementTips : base.imageImprovementTips,
-    contentPillars: partial.contentPillars?.length ? partial.contentPillars : base.contentPillars,
-  };
-}
+import type { AnalysisResult } from "./ai-brains";
 
 /**
- * Context-aware local engine: used as the fallback template for model output
- * (fills any field the model forgot) and as the instant demo mode.
+ * High quality local engine. It always produces a complete, structured
+ * viral package so the app never shows a dead end when a live AI key is
+ * missing, out of quota, or blocked.
  */
 export function generateSmartDemoAnalysis(
-  userNotes = "",
-  language = "Bangla / Banglish",
-  tone = "Viral & Catchy",
+  userNotes?: string,
+  language?: string,
+  tone?: string,
   brainUsed = "gemini-2.5-flash"
 ): AnalysisResult {
+  const notes = (userNotes || "").trim();
   const lang = (language || "").toLowerCase();
-  const isBangla = !lang || lang.includes("bangla") || lang.includes("banglish") || lang.includes("mixed");
-  const archetype = detectArchetype(userNotes);
-  const meta = ARCHETYPE_META[archetype];
-  const { hook, verdict } = toneHooks(tone, isBangla, archetype);
-  const contextLine = userNotes?.trim()
-    ? isBangla
-      ? `প্রসঙ্গ: ${userNotes.trim()}`
-      : `Context: ${userNotes.trim()}`
-    : "";
+  const isBangla =
+    lang.includes("bangla") ||
+    lang.includes("banglish") ||
+    lang.includes("mixed") ||
+    (!lang && !notes);
 
-  const fbBody = isBangla
-    ? `${hook}\n\nআমরা সারাদিন কত প্ল্যান করি, ভবিষ্যতের হাজারটা হিসাব কষি। অথচ দিনশেষে সবচেয়ে সেরা মুহূর্তগুলো কোনো প্ল্যান ছাড়াই তৈরি হয়ে যায়।\n\nএই ফ্রেমটা শুধু একটা দৃশ্য না — এটা একটা অনুভূতি, এক চিমটি শান্তি, আর এক টুকরো সময় যেটা আর কখনো ঠিক এভাবে ফিরে আসবে না।${contextLine ? `\n\n${contextLine}` : ""}\n\nআপনার ফোনে এমন কোন ছবিটা আছে যেটা দেখলেই মন ভালো হয়ে যায়? কমেন্টে বলুন, আমি সবগুলো পড়বো। ❤️`
-    : `${hook}\n\nWe spend all day planning tomorrow, running a thousand calculations. Yet the moments that stay with us are almost never the ones we scheduled.\n\nThis frame isn't just a scene — it's a feeling, a small pocket of calm, a slice of time that won't return in quite this shape again.${contextLine ? `\n\n${contextLine}` : ""}\n\nWhich photo on your phone instantly lifts your mood? Tell me below — I'm reading every one. ❤️`;
-
-  const igBody = isBangla
-    ? `${hook}\n\nআমরা সবাই দৌড়াতে খুব ভালো, কিন্তু থামতে ভুলে যাই।\nএই ফ্রেমটা আমাকে মনে করিয়ে দিয়েছে — থামাটাও আসলে একটা skill।\n\nকোনো filter না, কোনো বড় প্ল্যান না।\nশুধু আলোটা ঠিক ছিল, আর মনটা ছিল সত্যিকারের উপস্থিত।\n\nপ্রতিদিন এমন কয়টা মুহূর্ত আমরা চোখের সামনে দিয়ে হারিয়ে ফেলি, খেয়ালই করি না। আজ হয়তো একটা থামার দিন।\n\n🔖 Save করে রাখুন — যেদিন একটা quiet reminder দরকার হবে।\n💬 আপনার peace-এর জায়গা কোনটা? কমেন্টে বলুন 👇`
-    : `${hook}\n\nWe are all good at running, and terrible at stopping.\nThis frame reminded me that pausing is a skill too.\n\nNo filter. No big plan.\nJust the right light, and a mind that was genuinely present.\n\nMost days we walk past a dozen moments exactly like this one without ever noticing. Today felt like a good day to stop.\n\n🔖 Save this for the day you need a quiet reminder.\n💬 Where's your peace place? Tell me below 👇`;
-
-  const strategy = buildDefaultStrategy(
-    {
-      verdict,
-      hookVariants: isBangla
-        ? [hook, "এই ছবিটা দেখে প্রথম যে কথাটা মাথায় এলো...", "সত্যি বলতে, এই মুহূর্তটার জন্য কোনো ক্যাপশন হয় না।"]
-        : [hook, "The first thing that came to mind when I saw this frame...", "Honestly, no caption does this moment justice."],
-    },
-    archetype,
-    hook
-  );
+  const topic = notes.length > 0 ? notes : "এই মুহূর্তটির গল্প";
+  const brainLabel = brainUsed;
 
   return {
     deepAnalysis: {
-      summary: meta.summary,
-      subjects: meta.subjects,
-      vibeAndMood: isBangla
-        ? "Authentic, nostalgic yet modern — a calm frame with real emotional pull."
-        : "Authentic, nostalgic yet modern — a calm frame with real emotional pull.",
-      colorPalette: meta.palette,
-      lightingAndSetting: meta.light,
-      storytellingAngle: "Raw authenticity over staged perfection: the quiet courage inside an ordinary moment.",
-      emotionalHook: "Relatability and introspection — it makes the viewer pause and think about their own version of this moment.",
-      targetAudience: meta.audience,
-      compositionNotes: meta.composition,
-      textInImage: "None detected",
-      culturalContext: "Reads naturally for Bangladeshi / South Asian audiences while staying globally relatable.",
-      thumbStopFactor: "Strong single focal point + warm light = instant pause in the feed.",
+      summary: `ছবিটির কম্পোজিশন, আলোর খেলা এবং রঙের সমন্বয় একে বিশেষ করে তুলেছে — "${topic}" এই কনটেক্সটকে আরো গভীর ও আবেগঘন করেছে। ফ্রেমের গভীরতা ও সাবজেক্টের অবস্থান দর্শকের চোখকে সরাসরি মূল গল্পের দিকে নিয়ে যায়, যা সোশ্যাল ফিডে স্ক্রল থামানোর জন্য অত্যন্ত কার্যকর।`,
+      subjects: [
+        "Primary Visual Subject",
+        "Environmental / Background Layer",
+        "Cinematic Natural Lighting",
+        "Emotional Human Connection",
+      ],
+      vibeAndMood: "প্রামাণ্য, নান্দনিক এবং একইসাথে আবেগঘন — যেখানে authenticity আর aspiration দুটোই একসাথে উপস্থিত।",
+      colorPalette: ["#1E293B", "#F59E0B", "#10B981", "#6366F1", "#F8FAFC"],
+      lightingAndSetting:
+        "সোনালি বা প্রাকৃতিক ডিফিউজড লাইট, সফট শ্যাডো ট্রানজিশন এবং সিনেম্যাটিক ডেপথ — ফলে সাবজেক্ট স্পষ্টভাবে আলাদা হয়ে দাঁড়ায়।",
+      storytellingAngle:
+        "নিঃশব্দ সাহস ও দৈনন্দিন সৌন্দর্যের গল্প: পারফেকশনের বদলে real moment-এর মূল্যকে তুলে ধরা।",
+      emotionalHook:
+        "স্মৃতি, আশা এবং নিজের জীবনের সাথে তুলনা — দর্শককে নিজের অভিজ্ঞতা কমেন্টে শেয়ার করতে উদ্দীপিত করে।",
+      targetAudience: "১৮–৩৫ বছর বয়সী সোশ্যাল অ্যাক্টিভ ইউজার, ক্রিয়েটর, ভ্রমণপিপাসু ও লাইফস্টাইল এন্থুজিয়াস্ট।",
     },
+
     facebookOutput: {
-      hookLine: hook,
-      primaryCaption: fbBody,
+      hookLine: isBangla
+        ? "কিছু ছবি শুধু দেখা যায় না, অনুভব করা হয়... এবং এই ফ্রেমটা ঠিক তেমনই একটা। ✨"
+        : "Some frames aren't just seen — they're felt. And this one hits different. ✨",
+      primaryCaption: isBangla
+        ? `কিছু ছবি শুধু দেখা যায় না, অনুভব করা হয়... ✨\n\nআমরা সারাদিন হাজারটা পরিকল্পনা করি, ভবিষ্যতের হিসাব কষি। কিন্তু জীবনের সবচেয়ে সেরা মুহূর্তগুলো কোনো প্ল্যান ছাড়াই তৈরি হয়ে যায়।\n\n"${topic}" — এই এক লাইনটাই আসলে পুরো ছবিটার মূল কথা। ক্যামেরা যখন শুধু একটা দৃশ্য ধরে রাখে, তখন মনের ভেতরের হাজারটা অনুভূতিও একসাথে বন্দি হয়ে যায়।\n\nআপনার জীবনেও কি এমন কোনো মুহূর্ত আছে যা দেখলেই মন ভালো হয়ে যায়? কমেন্টে জানান — পড়তে আমার ভালো লাগবে। ❤️\n\n👇 একটু ভাবুন: গত সপ্তাহে আপনার সবচেয়ে ভালো দিনটা কোনটা ছিল?`
+        : `Some frames aren't just seen — they're felt. ✨\n\nWe spend so much time planning tomorrow that we forget to notice today. But the best moments of our lives are almost never scheduled.\n\n"${topic}" — that one line captures what this frame is really about. A camera doesn't just freeze a scene; it freezes a feeling.\n\nDo you have one photo that instantly lifts your mood? Tell me in the comments — I read every single one. ❤️`,
       shortPunchyCaption: isBangla
-        ? "শান্তির খোঁজ বাইরে না — এমন ছোট ছোট মুহূর্তের মাঝেই লুকিয়ে থাকে। 🌿"
-        : "Less perfection, more presence. Peace hides in moments like this. 🌿",
+        ? "পারফেকশন নয়, উপস্থিতি — এমন মুহূর্তেই আসল গল্পটা লুকিয়ে থাকে। 🌿"
+        : "Less perfection, more presence. 🌿",
       hashtags: [
-        "#LifeMoments",
-        "#AuthenticVibes",
-        "#Storytelling",
-        "#BanglaVibes",
-        "#DailyLife",
-        "#Memories",
-        "#GoodVibes",
-        "#Bangladesh",
-        "#PhotoOfTheDay",
-        "#TrendingNow",
+        "#momentsthatmatter",
+        "#reallife",
+        "#storyteller",
+        "#authenticvibes",
+        "#positiveenergy",
+        "#visualstorytelling",
+        "#trendingnow",
+        "#shareyourstory",
       ],
       viralStrategyTips: [
-        "Post between 8:00–10:00 PM BST; reach compounds in the first 60 minutes.",
-        "Pin your own question comment within 2 minutes and reply to the first 10 commenters.",
-        "Share to 2–3 relevant groups 2 hours later with a one-line personal intro (not the same caption).",
-        "No external links in the post body — put links in the first comment.",
+        isBangla
+          ? "সন্ধ্যা ৭:৩০–৯:৩০ PM (BST) ফেসবুকে সবচেয়ে বেশি অ্যাক্টিভ সময় — এই উইন্ডোতে পোস্ট করলে প্রথম ৬০ মিনিটেই ভালো রিচ পাওয়া যায়।"
+          : "Post between 7:30–9:30 PM when feed activity peaks, so the first 60-minute velocity window is strong.",
+        isBangla
+          ? "প্রথম ৩ মিনিটের মধ্যে নিজেই একটা কমেন্ট দিন (একটা প্রশ্ন সহ) এবং সেটি পিন করুন — এতে কমেন্ট থ্রেড শুরু হয়।"
+          : "Seed your own first comment with a question and pin it — comment velocity is the strongest early signal.",
+        isBangla
+          ? "প্রথম ৫ জন কমেন্টারকে ১০ মিনিটের মধ্যে রিপ্লাই দিন, অ্যালগরিদম এটাকে স্ট্রং এনগেজমেন্ট সিগন্যাল ধরে।"
+          : "Reply to the first five comments within ten minutes to trigger the feedback loop.",
       ],
       callToAction: isBangla
-        ? "আপনার জীবনের এমন একটা মুহূর্ত কোনটা? কমেন্টে জানাবেন?"
-        : "Which moment from your week made you smile? Tell me below!",
-      firstComment: isBangla
-        ? "এই ছবির পেছনের গল্পটা জানতে চাইলে comment এ 'গল্প' লিখুন 👀"
-        : "Want the story behind this frame? Comment 'story' 👀",
+        ? "আপনার জীবনের এমন একটা প্রিয় স্মৃতি কমেন্টে শেয়ার করুন — সবচেয়ে সুন্দর উত্তরটা আমি রিপোস্ট করব! ❤️"
+        : "Share one memory this frame reminds you of — I'll repost my favourite one. ❤️",
     },
+
     twitterOutput: {
       singleTweet: isBangla
-        ? "জীবনটা perfect হওয়ার দরকার নেই — শুধু খাঁটি আর শান্তিময় হলেই যথেষ্ট। 🕊️\n\nAgree?"
-        : "You don't need a perfect life. Just peaceful moments and genuine people. 🕊️\n\nAgree?",
-      threadTweets: isBangla
-        ? [
-            "1/3 কিছু ফ্রেম কেন এত মনে গেঁথে যায়? কারণ এর ভেতরে কোনো show-off থাকে না — থাকে pure reality। 🧵",
-            "2/3 সবাই যখন perfection দেখাতে ব্যস্ত, তখন relaxed থাকাটাই সবচেয়ে বড় flex। শান্তি খুঁজে পাওয়া একটা art।",
-            "3/3 এই vibe ভালো লাগলে bookmark করুন আর যাকে দরকার তাকে পাঠিয়ে দিন। ✨",
-          ]
-        : [
-            "1/3 Why do candid frames hit harder than staged ones? Because real eyes recognise real presence. 🧵",
-            "2/3 In a feed full of perfection, staying relaxed is the loudest flex. Finding peace is a skill.",
-            "3/3 If this frame slowed your scroll, bookmark it and send it to someone who needs a breather. ✨",
-          ],
-      hashtags: ["#VibeCheck", "#Mindset"],
-      quoteBaitPrompt: isBangla ? "এক শব্দে: আপনার কাছে শান্তি মানে কী?" : "One word: what does peace mean to you?",
-      viralStrategyTips: [
-        "Single line breaks only — X rewards fast mobile reading.",
-        "Keep the tweet under 240 chars so quote tweets don't truncate it.",
-        "Quote-tweet yourself 24h later with the story behind the frame.",
+        ? "জীবনটা পারফেক্ট হওয়ার দরকার নেই। শুধু খাঁটি আর শান্তিময় হলেই যথেষ্ট। 🕊️\n\nAgree or disagree? Quote করে বলুন।"
+        : "Your life doesn't need to be perfect. It just needs to be real and peaceful. 🕊️\n\nAgree or disagree? Quote this.",
+      threadTweets: [
+        isBangla
+          ? "১/৩ কিছু ফ্রেম কেন এত মনের মধ্যে গেঁথে যায়? কারণ এর ভেতরে কোনো কৃত্রিম শো-অফ থাকে না — থাকে পিউর রিয়েলিটি। 🧵👇"
+          : "1/3 Why do candid frames hit harder than staged ones? Because real eyes recognise real presence. 🧵👇",
+        isBangla
+          ? "২/৩ আজকের যুগে সবাই perfection showcase করতে ব্যস্ত। রিল্যাক্সড ও authentic থাকাটাই আসল ফ্লেক্স। শান্তি খুঁজে পাওয়া একটা আর্ট।"
+          : "2/3 Everyone is optimising their feed. Quiet authenticity is the rarest thing on the timeline now.",
+        isBangla
+          ? "৩/৩ এই ভাইবটা ভালো লাগলে বুকমার্ক করুন — যেদিন একটু শান্তি প্রয়োজন হবে, এই পোস্টটা কাজে লাগবে। ✨"
+          : "3/3 If this hits, bookmark it — future you will need this calm. ✨",
       ],
-      altText: "A calm, naturally lit photo with a single clear subject and soft ambient background.",
+      hashtags: ["#mindsetdaily", "#vibecheck", "#authenticity"],
+      quoteBaitPrompt: isBangla
+        ? "এক শব্দে বলুন: আপনার কাছে প্রশান্তি মানে কী?"
+        : "In one word: what gives you instant peace of mind?",
+      viralStrategyTips: [
+        isBangla
+          ? "টুইটের প্রথম লাইনটাই ৮০% সিদ্ধান্ত নেয় — সর্বোচ্চ ৯০ ক্যারেক্টারের মধ্যে সবচেয়ে শক্তিশালী লাইনটি রাখুন।"
+          : "The first line decides 80% of the reach — keep the strongest claim under 90 characters.",
+        isBangla
+          ? "রিপ্লাইতে একটা ছোট পার্ট-২ দিন, এতে থ্রেডের এনগেজমেন্ট আরো বাড়ে।"
+          : "Reply to your own tweet with a part-2 to keep the thread alive.",
+      ],
     },
+
     instagramOutput: {
-      mainCaption: igBody,
-      minimalCaption: isBangla ? "soft frames, quiet thoughts. ✨" : "soft frames, quiet thoughts. ✨",
-      reelsHook: isBangla ? "POV: আপনি finally noise-এর বদলে peace বেছে নিলেন" : "POV: you finally chose peace over noise",
+      mainCaption: isBangla
+        ? `chasing peace, not perfection. 🍃\n.\n.\n"${topic}" — কিছু মুহূর্ত হৃদয়ে ছবি হয়ে থেকে যায়। ধীরে নিঃশ্বাস নিন, এখানে থাকুন।\n.\n.\n📍 এই ফ্রেমটি সেভ করে রাখুন — যেদিন একটু বিরতি প্রয়োজন হবে। 🤍\n.\n.\nআপনার ফিডে এমন কোনো ছবি আছে কি? স্টোরিতে ট্যাগ করুন!`
+        : `chasing peace, not perfection. 🍃\n.\n.\n"${topic}" — some frames stay with us long after the moment is gone.\n.\n.\n📍 Save this for when you need a quiet reminder to pause. 🤍\n.\n.\nTag me in your story if this felt like you.`,
+      minimalCaption: "soft frames & quiet thoughts. ✨",
+      reelsHook: "POV: You finally stopped chasing noise and started chasing peace...",
       tieredHashtags: {
-        highReach: ["#explorepage", "#photooftheday", "#aesthetic", "#reels", "#instagood"],
-        midNiche: ["#visualstoryteller", "#moodygrams", "#candidfeed", "#bangladeshiphotographers", "#dhakagram", "#peacefulvibes", "#visualsoflife"],
-        community: ["#momentkeepers", "#aestheticlifestyle", "#creatorsofbangladesh", "#banglacreators", "#frameworthy"],
+        highReach: ["#visualsoflife", "#explorepage", "#aestheticmoments", "#moodygrams"],
+        midNiche: [
+          "#visualstoryteller",
+          "#candidfeed",
+          "#peacefulvibes",
+          "#authenticphotography",
+        ],
+        community: [
+          "#momentkeepers",
+          "#quietluxury",
+          "#slowliving",
+          "#chasingstillness",
+        ],
       },
       aestheticTips: [
-        "Use a 4:5 crop (1080×1350) for maximum feed real estate.",
-        "Post the same frame as a 5–6s Reel with slow zoom + trending calm audio for 5–10× reach.",
-        "Put hashtags in the first comment to keep the caption clean.",
+        isBangla
+          ? "৪:৫ (১০৮০×১৩৫০) অনুপাতে ক্রপ করুন — মোবাইল ফিডে সবচেয়ে বেশি জায়গা ঘেঁষে নেয়।"
+          : "Use a 4:5 (1080×1350) crop — it takes the most mobile feed real estate.",
+        isBangla
+          ? "ক্যাপশনের মাঝে ফাঁকা লাইন রাখুন — এতে পাঠ্যতা বাড়ে, লোকজন শেষ পর্যন্ত পড়ে।"
+          : "Keep paragraph spacing generous — readable captions get read to the end.",
+        isBangla
+          ? "প্রথম ঘণ্টায় স্টোরিতে শেয়ার করুন, স্টোরি ভিউ ইনস্টাগ্রাম অ্যালগরিদমে একটা স্ট্রং সিগন্যাল।"
+          : "Share to story within the first hour — story views are a strong ranking signal.",
       ],
-      carouselIdea: "Slide 1: the frame · Slide 2: a tighter crop/detail · Slide 3: the hook line as text on a plain background · Slide 4: 'save this' CTA.",
-      altText: "A naturally lit, calm photograph with one clear subject and a soft, atmospheric background.",
     },
+
     linkedinOutput: {
       professionalCaption: isBangla
-        ? `কাজের ব্যস্ততা আর deadline-এর মাঝে আমরা প্রায়ই ভুলে যাই — মস্তিষ্ক reload করার জন্যও 'pause' বোতামটা চাপতে হয়। 🎯\n\nবড় ফলাফল পেতে ২৪ ঘণ্টা নন-স্টপ দৌড়ানো লাগে না; লাগে সঠিক focus আর মানসিক ভারসাম্য।\n\nআপনি কীভাবে নিজের work-life balance ধরে রাখেন?`
-        : `Behind every milestone there's a quiet moment of reflection. 🎯\n\nIn an era of relentless hustle, intentional pauses aren't lost momentum — they're how you calibrate focus for long-term impact.\n\nHow do you recharge during high-intensity weeks?`,
-      keyTakeaway: "Sustainable high performance starts with intentional mental clarity.",
-      hashtags: ["#Productivity", "#Mindset", "#WorkLifeBalance", "#Leadership"],
+        ? `কাজের ব্যস্ততা এবং ডেডলাইনের মাঝে আমরা প্রায়ই ভুলে যাই — উচ্চ কর্মদক্ষতার জন্য ২৪ ঘণ্টা দৌড়ানো নয়, প্রয়োজন ফোকাসড বিরতি। 🎯\n\nদীর্ঘমেয়াদী সফলতার মূলে থাকে মানসিক স্পষ্টতা এবং ইচ্ছাকৃত পুনরায় চার্জ হওয়া। সেরা আইডিয়াগুলো তখনই আসে যখন আমরা একটু থেমে যাই।\n\nআপনি কীভাবে নিজের কাজের ছন্দ ঠিক রাখেন? নিচে শেয়ার করুন — আমি শিখতে চাই।`
+        : `Behind every milestone there is a quiet moment of recalibration. 🎯\n\nSustainable high performance isn't about relentless hustle — it's about intentional recovery and mental clarity. The best ideas arrive when we pause.\n\nHow do you protect your focus during intense weeks? Share below — I'd love to learn.`,
+      keyTakeaway: isBangla
+        ? "বিশ্রাম মানে পিছিয়ে পড়া নয় — সেটাই আসল ফোকাস ফিউয়েল।"
+        : "Rest isn't falling behind — it's your focus fuel.",
+      hashtags: ["#productivity", "#mindset", "#leadership", "#worklifebalance"],
     },
-    strategy,
+
+    insights: {
+      engagementScore: 86,
+      shareabilityScore: 78,
+      saveWorthinessScore: 72,
+      viralityVerdict: isBangla
+        ? "আবেগঘন ও সার্বজনীন কনটেক্সট বলে এটি শেয়ার-সেন্সিটিভ ভাইরাল পোটেনশিয়াল তৈরি করে — আসল লিভার হলো প্রথম লাইনের কিউরিওসিটি হুক।"
+        : "Universal emotional context makes this highly shareable — the biggest lever is the curiosity gap in the first line.",
+      abHookVariants: [
+        isBangla
+          ? "আপনি কি কখনো এমন ছবি দেখেছেন যা আপনাকে থামতে বাধ্য করেছে?"
+          : "Ever seen a photo that physically stopped your scroll?",
+        isBangla
+          ? "সবাই পারফেকশন খোঁজে — আমি খুঁজেছি অসম্পূর্ণতার সৌন্দর্য।"
+          : "Everyone chases perfection. I chased the beauty of imperfection instead.",
+        isBangla
+          ? "এই একটি ফ্রেম আমাকে এক বছরের চিন্তা থেকে বের করে এনেছে।"
+          : "This single frame pulled me out of a year of overthinking.",
+      ],
+      trendTags: ["#2026aesthetic", "#slowliving", "#digitalwellbeing", "#storyoverstatus"],
+      seoKeywords: [
+        "candid photography caption",
+        "peaceful moment quotes",
+        "instagram caption ideas bangla",
+        "viral facebook post ideas",
+      ],
+      bestTimeToPost: [
+        "Facebook: সোম–বৃহস্পতি, রাত ৭:৩০–৯:৩০ PM (BST) — ফ্যামিলি ও ফ্রেন্ড গ্রুপে শেয়ার পিক",
+        "X (Twitter): রবি–মঙ্গল, রাত ৯:০০–১১:০০ PM — কনভারসেশন ও কোট-টুইট পিক",
+        "Instagram: শুক্র–শনি, দুপুর ১২:০০–২:০০ PM ও রাত ৮:০০–১০:০০ PM — সেভ ও স্টোরি শেয়ার পিক",
+      ],
+      contentPillars: ["Authentic Storytelling", "Mindset & Calm", "Visual Storytelling"],
+      carouselStoryboard: [
+        "Slide 1: থামানো হুক — ছোট টেক্সট ওভারলে সহ ছবিটি",
+        "Slide 2: সমস্যাটা তুলে ধরা — কেন আমরা এত ব্যস্ত",
+        "Slide 3: মোড় — এই মুহূর্তে যা শিখলাম",
+        "Slide 4: প্র্যাকটিক্যাল ৩টি ধাপ যা দর্শক আজই করতে পারে",
+        "Slide 5: CTA — সেভ করুন ও কমেন্টে নিজের গল্প জানান",
+      ],
+      audiencePainPoints: [
+        "দৈনন্দিন ব্যস্ততায় শান্তি হারিয়ে যাওয়া",
+        "সোশ্যাল মিডিয়ায় authenticity আর প্রেশারের দ্বন্দ্ব",
+      ],
+      riskNotes: isBangla
+        ? "অতিরিক্ত জেনেরিক হ্যাশট্যাগ এড়িয়ে চলুন; কোনো মেডিকেল/ফিন্যান্সিয়াল দাবি না করলেই ভালো।"
+        : "Avoid over-broad spam hashtags; don't make medical or financial claims in the caption.",
+    },
   };
 }
 
-/** Ensures legacy rows (saved before strategy existed) still render fully */
-export function ensureStrategy(result: Partial<AnalysisResult>, hook = ""): AnalysisResult {
-  const base = generateSmartDemoAnalysis();
-  return {
-    deepAnalysis: { ...base.deepAnalysis, ...(result.deepAnalysis || {}) },
-    facebookOutput: { ...base.facebookOutput, ...(result.facebookOutput || {}) },
-    twitterOutput: { ...base.twitterOutput, ...(result.twitterOutput || {}) },
-    instagramOutput: {
-      ...base.instagramOutput,
-      ...(result.instagramOutput || {}),
-      tieredHashtags: {
-        ...base.instagramOutput.tieredHashtags,
-        ...(result.instagramOutput?.tieredHashtags || {}),
-      },
-    },
-    linkedinOutput: { ...base.linkedinOutput, ...(result.linkedinOutput || {}) },
-    strategy: buildDefaultStrategy(result.strategy || {}, "portrait", hook || result.facebookOutput?.hookLine || ""),
-  };
-}
-
-export const DEMO_BRAIN_LABEL = (brain: string) => `local-viral-engine (${brain})`;
+/** Used by the API route as the canonical fallback template. */
+export const DEMO_BRAIN_LABEL = "local-viral-engine";

@@ -1,30 +1,24 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { X, Key, ExternalLink, Check, ShieldCheck, Loader2, AlertCircle, Wifi, Eye, EyeOff } from "lucide-react";
-import { Kicker, GeminiIcon, MistralIcon, Chip } from "./Shared";
+import React, { useState } from "react";
+import {
+  X,
+  Key,
+  ExternalLink,
+  Check,
+  Sparkles,
+  ShieldCheck,
+  Loader2,
+  AlertCircle,
+  Activity,
+} from "lucide-react";
+import { BRAINS, type BrainId, type BrainKeys } from "@/lib/brain-config";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  geminiKey: string;
-  mistralKey: string;
-  onSaveKeys: (geminiKey: string, mistralKey: string) => void;
-}
-
-interface ChainStatus {
-  model: string;
-  available: boolean;
-}
-
-interface ProbeInfo {
-  model?: string;
-  ok?: boolean;
-  status?: number;
-  finishReason?: string;
-  reply?: string;
-  usage?: { input?: number; output?: number; thoughts?: number };
-  message?: string;
+  keys: BrainKeys;
+  onSaveKeys: (keys: BrainKeys) => void;
 }
 
 interface TestState {
@@ -32,272 +26,250 @@ interface TestState {
   done: boolean;
   valid: boolean;
   message: string;
-  probe?: ProbeInfo | null;
-  chainStatus?: ChainStatus[];
 }
+
 const emptyTest: TestState = { loading: false, done: false, valid: false, message: "" };
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, geminiKey: initialGemini, mistralKey: initialMistral, onSaveKeys }) => {
-  const [geminiKey, setGeminiKey] = useState(initialGemini);
-  const [mistralKey, setMistralKey] = useState(initialMistral);
-  const [show, setShow] = useState(false);
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  isOpen,
+  onClose,
+  keys: initialKeys,
+  onSaveKeys,
+}) => {
+  const [keys, setKeys] = useState<BrainKeys>(initialKeys);
   const [saved, setSaved] = useState(false);
-  const [geminiTest, setGeminiTest] = useState<TestState>(emptyTest);
-  const [mistralTest, setMistralTest] = useState<TestState>(emptyTest);
-
-  useEffect(() => {
-    if (isOpen) {
-      setGeminiKey(initialGemini);
-      setMistralKey(initialMistral);
-      setGeminiTest(emptyTest);
-      setMistralTest(emptyTest);
-      setShow(false);
-    }
-  }, [isOpen, initialGemini, initialMistral]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    if (isOpen) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, onClose]);
+  const [tests, setTests] = useState<Partial<Record<BrainId, TestState>>>({});
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [reports, setReports] = useState<
+    Array<{ brain: string; label: string; ok: boolean; latencyMs: number; model?: string; code?: string; error?: string; hint?: string }>
+  >([]);
+  const [verdict, setVerdict] = useState("");
 
   if (!isOpen) return null;
 
-  const save = () => {
-    onSaveKeys(geminiKey.trim(), mistralKey.trim());
-    setSaved(true);
-    setTimeout(() => {
-      setSaved(false);
-      onClose();
-    }, 800);
-  };
+  const setTest = (brain: BrainId, state: TestState) =>
+    setTests((prev) => ({ ...prev, [brain]: state }));
 
-  const testKey = async (brain: "gemini" | "mistral") => {
-    const setter = brain === "gemini" ? setGeminiTest : setMistralTest;
-    setter({ loading: true, done: false, valid: false, message: "" });
+  const testKey = async (brain: BrainId) => {
+    setTest(brain, { loading: true, done: false, valid: false, message: "" });
     try {
       const res = await fetch("/api/validate-key", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brain, apiKey: brain === "gemini" ? geminiKey.trim() : mistralKey.trim() }),
+        body: JSON.stringify({ brain, apiKey: keys[brain].trim() }),
       });
       const data = JSON.parse(await res.text());
-      setter({
+      setTest(brain, {
         loading: false,
         done: true,
-        valid: Boolean(data.valid) && data.probe?.ok !== false,
-        message: data.message || (data.valid ? "Key কাজ করছে ✓" : "Key কাজ করছে না"),
-        probe: data.probe || null,
-        chainStatus: data.chainStatus || [],
+        valid: Boolean(data.valid),
+        message: data.message || (data.valid ? "Key কাজ করছে ✅" : "Key কাজ করছে না"),
       });
     } catch {
-      setter({ loading: false, done: true, valid: false, message: "যাচাই করা যায়নি — ইন্টারনেট সংযোগ দেখুন।" });
+      setTest(brain, {
+        loading: false,
+        done: true,
+        valid: false,
+        message: "যাচাই করা যায়নি। ইন্টারনেট সংযোগ পরীক্ষা করুন।",
+      });
     }
   };
 
-  const ChainStrip = ({ t }: { t: TestState }) =>
-    t.chainStatus?.length ? (
-      <div className="mt-2 flex flex-wrap gap-1">
-        {t.chainStatus.map((c) => (
-          <span
-            key={c.model}
-            title={c.available ? "এই key-তে available" : "এই key-তে পাওয়া যাচ্ছে না"}
-            className={`rounded-md border px-1.5 py-0.5 font-mono text-[9.5px] ${
-              c.available ? "border-mint/30 bg-mint/10 text-mint" : "border-ink-600 bg-ink-800 text-ink-400 line-through"
-            }`}
-          >
-            {c.model}
-          </span>
-        ))}
-      </div>
-    ) : null;
-
-  const status = (t: TestState) => {
-    if (t.loading)
-      return (
-        <p className="mt-2 flex items-center gap-2 text-[11.5px] text-ink-300">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> key যাচাই হচ্ছে…
-        </p>
-      );
-    if (!t.done) return null;
-    return (
-      <p
-        className={`mt-2 flex items-start gap-2 rounded-lg border px-3 py-2 text-[11.5px] leading-relaxed ${
-          t.valid ? "border-mint/30 bg-mint/10 text-mint" : "border-coral/30 bg-coral/10 text-coral"
-        }`}
-      >
-        {t.valid ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-        <span className="flex-1 break-words">
-          {t.message}
-          {t.probe?.reply ? (
-            <span className="mt-1 block rounded-md border border-ink-700 bg-ink-950/70 px-2 py-1 font-mono text-[10.5px] text-ink-300">
-              probe reply: {t.probe.reply}
-            </span>
-          ) : null}
-          {t.probe && t.probe.ok === false ? (
-            <span className="mt-1 block font-mono text-[10.5px] text-amber">
-              probe {t.probe.model} → {t.probe.finishReason || `HTTP ${t.probe.status}`} {t.probe.message ? `· ${t.probe.message}` : ""}
-            </span>
-          ) : null}
-          {t.probe?.usage ? (
-            <span className="mt-1 block font-mono text-[10px] text-ink-400">
-              tokens: in {t.probe.usage.input ?? 0} · out {t.probe.usage.output ?? 0}
-              {t.probe.usage.thoughts ? ` · thinking ${t.probe.usage.thoughts}` : ""}
-            </span>
-          ) : null}
-        </span>
-      </p>
-    );
+  const runDiagnostics = async () => {
+    setIsDiagnosing(true);
+    setReports([]);
+    setVerdict("");
+    try {
+      const res = await fetch("/api/diagnose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brain: "all",
+          geminiKey: keys.gemini.trim(),
+          mistralKey: keys.mistral.trim(),
+          groqKey: keys.groq.trim(),
+          openrouterKey: keys.openrouter.trim(),
+          huggingfaceKey: keys.huggingface.trim(),
+        }),
+      });
+      const data = JSON.parse(await res.text());
+      setReports(data.reports || []);
+      setVerdict(data.verdict || "");
+    } catch {
+      setVerdict("ডায়াগনস্টিক চালানো যায়নি (নেটওয়ার্ক)।");
+    } finally {
+      setIsDiagnosing(false);
+    }
   };
 
-  const KeyRow = ({
-    brain,
-    label,
-    icon,
-    value,
-    onChange,
-    placeholder,
-    link,
-    linkLabel,
-    test,
-    accent,
-  }: {
-    brain: "gemini" | "mistral";
-    label: string;
-    icon: React.ReactNode;
-    value: string;
-    onChange: (v: string) => void;
-    placeholder: string;
-    link: string;
-    linkLabel: string;
-    test: TestState;
-    accent: string;
-  }) => (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between">
-        <label className="flex items-center gap-2 text-[13px] font-bold text-white">
-          <span style={{ color: accent }}>{icon}</span>
-          {label}
-          {value ? <Chip tone="mint" className="!py-0 font-mono !text-[9.5px]">••••{value.slice(-4)}</Chip> : <Chip tone="neutral" className="!py-0 font-mono !text-[9.5px]">not set</Chip>}
-        </label>
-        <a href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11.5px] font-semibold hover:underline" style={{ color: accent }}>
-          {linkLabel} <ExternalLink className="h-3 w-3" />
-        </a>
-      </div>
-      <div className="flex gap-2">
-        <input
-          type={show ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          autoComplete="off"
-          spellCheck={false}
-          className="field font-mono !text-[12.5px]"
-        />
-        <button
-          type="button"
-          onClick={() => testKey(brain)}
-          disabled={test.loading}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 text-[12px] font-bold transition disabled:opacity-50"
-          style={{ borderColor: `${accent}55`, color: accent, background: `${accent}14` }}
-        >
-          <Wifi className="h-3.5 w-3.5" /> Test
-        </button>
-      </div>
-      {status(test)}
-      <ChainStrip t={test} />
-    </div>
-  );
+  const handleSave = () => {
+    onSaveKeys(keys);
+    setSaved(true);
+    setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 900);
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/80 p-3 backdrop-blur-sm sm:items-center sm:p-6"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="toast-in w-full max-w-lg overflow-hidden rounded-2xl border border-ink-700 bg-ink-900 shadow-2xl">
-        <header className="flex items-center gap-3 border-b border-ink-700 px-5 py-4">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-lime/30 bg-lime/10 text-lime">
-            <Key className="h-4 w-4" />
-          </span>
-          <div>
-            <Kicker className="text-lime">Brains</Kicker>
-            <h3 className="font-display text-lg font-bold text-white">API key configuration</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <div className="bg-[#0B121B] border border-white/10 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.02]">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-[#C6F24E]/10 text-[#C6F24E] border border-[#C6F24E]/25">
+              <Key className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-white">5-Brain API Configuration</h3>
+              <p className="text-[11px] text-white/45">Gemini · Mistral · Groq · OpenRouter · Hugging Face</p>
+            </div>
           </div>
-          <button type="button" onClick={onClose} className="ml-auto rounded-lg border border-ink-600 p-2 text-ink-300 transition hover:text-white" aria-label="Close">
-            <X className="h-4 w-4" />
+          <button type="button" onClick={onClose} className="text-white/50 hover:text-white p-1 rounded-lg hover:bg-white/10 transition">
+            <X className="w-5 h-5" />
           </button>
-        </header>
-
-        <div className="space-y-5 p-5">
-          <div className="flex items-start gap-3 rounded-xl border border-ink-700 bg-ink-850 p-3.5 text-[12px] leading-relaxed text-ink-200">
-            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-mint" />
-            <p>
-              Key শুধু আপনার ব্রাউজারে (localStorage) থাকে এবং প্রতিটি রিকোয়েস্টে সার্ভার হয়ে সরাসরি Gemini / Mistral-এ যায় — আমাদের ডাটাবেসে কখনো সেভ হয় না।
-            </p>
-          </div>
-
-          <KeyRow
-            brain="gemini"
-            label="Google Gemini"
-            icon={<GeminiIcon className="h-4 w-4" />}
-            value={geminiKey}
-            onChange={(v) => {
-              setGeminiKey(v);
-              setGeminiTest(emptyTest);
-            }}
-            placeholder="AIzaSy… (gemini-2.5-flash)"
-            link="https://aistudio.google.com/app/apikey"
-            linkLabel="Free key"
-            test={geminiTest}
-            accent="#c6f135"
-          />
-
-          <KeyRow
-            brain="mistral"
-            label="Mistral AI"
-            icon={<MistralIcon className="h-4 w-4" />}
-            value={mistralKey}
-            onChange={(v) => {
-              setMistralKey(v);
-              setMistralTest(emptyTest);
-            }}
-            placeholder="Mistral API key (pixtral vision)"
-            link="https://console.mistral.ai/api-keys/"
-            linkLabel="Console"
-            test={mistralTest}
-            accent="#ffc34d"
-          />
-
-          <p className="rounded-xl border border-ink-700 bg-ink-850 p-3 text-[11.5px] leading-relaxed text-ink-300">
-            <span className="font-semibold text-ink-100">Tip:</span> key না থাকলেও app fail করবে না — লোকাল ভাইরাল ইঞ্জিন প্যাকেজ বানিয়ে দেবে। কিন্তু আসল ছবি-ভিত্তিক deep analysis পেতে একটি key দিন (Gemini-এর free tier যথেষ্ট)।
-          </p>
         </div>
 
-        <footer className="flex items-center justify-between gap-3 border-t border-ink-700 bg-ink-850/60 px-5 py-4">
-          <button type="button" onClick={() => setShow((s) => !s)} className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-ink-300 hover:text-white">
-            {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-            {show ? "Hide keys" : "Show keys"}
-          </button>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-[12px] font-semibold text-ink-300 hover:text-white">
-              বন্ধ করুন
-            </button>
-            <button
-              type="button"
-              onClick={save}
-              className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-[12.5px] font-bold transition active:scale-95 ${
-                saved ? "bg-mint text-ink-950" : "bg-lime text-lime-ink hover:bg-[#d4f85c]"
-              }`}
-            >
-              {saved ? <Check className="h-4 w-4" /> : <Key className="h-4 w-4" />}
-              {saved ? "সেভ হয়েছে" : "সেভ করুন"}
-            </button>
+        <div className="p-6 space-y-5 overflow-y-auto">
+          <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 flex items-start gap-3 text-[11px] text-white/65">
+            <ShieldCheck className="w-5 h-5 text-[#C6F24E] shrink-0 mt-0.5" />
+            <div className="leading-relaxed">
+              <span className="font-semibold text-white">গোপনীয়তা:</span> কী শুধু আপনার ব্রাউজারে থাকে, সার্ভারে সেভ হয় না। একাধিক ব্রেন কনফিগার করলে একটির কোটা শেষ হলে অন্যটি দিয়ে কাজ চলবে।
+            </div>
           </div>
-        </footer>
+
+          {BRAINS.map((brain) => {
+            const test = tests[brain.id] || emptyTest;
+            return (
+              <div key={brain.id} className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-semibold text-white/90 flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: brain.accent }} />
+                    {brain.name}
+                    <span className="text-[9px] font-mono-label px-1.5 py-0.5 rounded bg-white/5 text-white/40">
+                      {brain.meta}
+                    </span>
+                  </label>
+                  <a
+                    href={brain.docsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] flex items-center gap-1 hover:underline"
+                    style={{ color: brain.accent }}
+                  >
+                    Key নিন
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={keys[brain.id]}
+                    onChange={(e) => {
+                      setKeys((prev) => ({ ...prev, [brain.id]: e.target.value }));
+                      setTest(brain.id, emptyTest);
+                    }}
+                    placeholder={brain.placeholder}
+                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#0F1720] border border-white/10 focus:border-white/30 text-sm text-white placeholder-white/25 outline-none font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => testKey(brain.id)}
+                    disabled={test.loading}
+                    className="px-3 py-2.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1.5 shrink-0 disabled:opacity-60"
+                    style={{ borderColor: `${brain.accent}55`, color: brain.accent, backgroundColor: `${brain.accent}14` }}
+                  >
+                    {test.loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                    Test
+                  </button>
+                </div>
+
+                {test.done && (
+                  <div
+                    className="flex items-start gap-2 text-[11px] rounded-lg px-3 py-2 border leading-relaxed"
+                    style={{
+                      borderColor: test.valid ? "rgba(52,211,153,0.4)" : "rgba(255,122,91,0.4)",
+                      backgroundColor: test.valid ? "rgba(52,211,153,0.08)" : "rgba(255,122,91,0.08)",
+                      color: test.valid ? "#A7F3D0" : "#FFB39D",
+                    }}
+                  >
+                    {test.valid ? <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />}
+                    <span className="break-words">{test.message}</span>
+                  </div>
+                )}
+
+                <p className="text-[10px] text-white/35">
+                  {brain.freeNote} · খালি রাখলে সার্ভারের env key (যদি থাকে) ব্যবহার হবে
+                </p>
+              </div>
+            );
+          })}
+
+          {/* Full diagnostics */}
+          <div className="space-y-2.5 p-3.5 rounded-xl border border-white/10 bg-[#0F1720]">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-[#C6F24E]" />
+                  Full Brain Diagnostics
+                </div>
+                <p className="text-[10px] text-white/45 mt-0.5">সব ব্রেনে সত্যিকারের ভিশন কল — কে কাজ করছে, কেন ফেল করছে</p>
+              </div>
+              <button
+                type="button"
+                disabled={isDiagnosing}
+                onClick={runDiagnostics}
+                className="px-3 py-2 rounded-lg bg-[#C6F24E] text-[#0B121B] text-[11px] font-bold flex items-center gap-1.5 disabled:opacity-60 shrink-0"
+              >
+                {isDiagnosing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                {isDiagnosing ? "টেস্ট চলছে..." : "Run All"}
+              </button>
+            </div>
+
+            {verdict && <p className="text-[11px] text-white/70 leading-relaxed">{verdict}</p>}
+
+            {reports.map((report) => (
+              <div
+                key={report.brain}
+                className="p-3 rounded-lg border text-[11px] leading-relaxed"
+                style={{
+                  borderColor: report.ok ? "rgba(198,242,78,0.35)" : "rgba(255,122,91,0.4)",
+                  backgroundColor: report.ok ? "rgba(198,242,78,0.07)" : "rgba(255,122,91,0.08)",
+                }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-white">
+                    {report.ok ? "✅" : "❌"} {report.label}
+                  </span>
+                  <span className="font-mono text-[10px] text-white/45">{report.latencyMs}ms</span>
+                </div>
+                {report.ok ? (
+                  <p className="text-white/60 mt-1 font-mono text-[10px]">{report.model}</p>
+                ) : (
+                  <>
+                    <p className="mt-1 text-[#FFB39D] font-medium">{report.code}: {report.error}</p>
+                    {report.hint && <p className="mt-1 text-white/60">→ {report.hint}</p>}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end px-6 py-4 border-t border-white/10 bg-white/[0.02] gap-3">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-xs font-semibold text-white/50 hover:text-white transition">
+            বন্ধ করুন
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="px-5 py-2 rounded-xl text-xs font-bold text-[#0B121B] flex items-center gap-2 transition"
+            style={{ backgroundColor: saved ? "#34d399" : "#C6F24E" }}
+          >
+            {saved ? <Check className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+            {saved ? "সংরক্ষণ সম্পন্ন!" : "সেভ করুন"}
+          </button>
+        </div>
       </div>
     </div>
   );
